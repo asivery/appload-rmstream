@@ -1,0 +1,3 @@
+[submodule "backend/rmpp-appload"]
+	path = backend/rmpp-appload
+	url = https://github.com/asivery/rmpp-appload.git

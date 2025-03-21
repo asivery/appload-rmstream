@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>RMStream</title>
+    <style>
+        body {
+            margin: 0px;
+            padding: 10px;
+            width: calc(100vw - 20px);
+            height: calc(100vh - 20px);
+            background: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-content: center;
+        }
+
+        img {
+            object-fit: contain;
+            transition: transform 0.3s ease;
+        }
+
+        img[data-rot='0'],
+        img[data-rot='180'] {
+            max-width: 100vw;
+            max-height: 100vh;
+        }
+
+        img[data-rot='90'],
+        img[data-rot='270'] {
+            max-width: 100vh;
+            max-height: 100vw;
+        }
+
+        img[data-rot='90'] {
+            transform: rotate(90deg);
+        }
+
+        img[data-rot='180'] {
+            transform: rotate(180deg);
+        }
+
+        img[data-rot='270'] {
+            transform: rotate(270deg);
+        }
+
+        #pointer {
+            position: absolute;
+            background-color: red;
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            top: 20px;
+            left: 20px;
+        }
+
+        /* Menu Styles */
+        .menu {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+        }
+
+        .hamburger {
+            width: 30px;
+            height: 25px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+
+        .hamburger div {
+            height: 4px;
+            background-color: black;
+            border-radius: 2px;
+        }
+
+        .dropdown {
+            display: none;
+            flex-direction: column;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 5px;
+            margin-top: 5px;
+        }
+
+        .menu:hover .dropdown {
+            display: flex;
+        }
+
+        .dropdown button {
+            background: none;
+            border: none;
+            padding: 5px 10px;
+            text-align: left;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .dropdown button:hover {
+            background-color: #eee;
+        }
+    </style>
+</head>
+
+<body>
+    <div class='menu'>
+        <div class='hamburger'>
+            <div></div>
+            <div></div>
+            <div></div>
+        </div>
+        <div class='dropdown'>
+            <button onclick='rotateImage()'>Rotate Image</button>
+            <button onclick='toggleCursor()'><span id='cursorToggleText'>Disable Cursor</span></button>
+        </div>
+    </div>
+
+    <img id='root' data-rot='0' src='#'>
+    <span id='pointer' style='display: none;'></span>
+
+    <script>
+        let rotation = 0;
+        let cursorEnabled = true;
+
+        function rotateImage() {
+            rotation = (rotation + 90) % 360;
+            const img = document.getElementById('root');
+            img.setAttribute('data-rot', rotation);
+        }
+
+        function toggleCursor() {
+            cursorEnabled = !cursorEnabled;
+            const pointer = document.getElementById('pointer');
+            const toggleText = document.getElementById('cursorToggleText');
+            if (cursorEnabled) {
+                startPointerFetching();
+                toggleText.innerText = 'Disable Cursor';
+            } else {
+                stopPointerFetching();
+                toggleText.innerText = 'Enable Cursor';
+            }
+        }
+
+        async function getPointerData() {
+            return (await (await fetch('/pointer')).text()).split(' ').map(e => parseInt(e));
+        }
+
+        let pointerFetchingInterval = -1;
+
+        function stopPointerFetching() {
+            const pointer = document.getElementById('pointer');
+            if (pointerFetchingInterval !== -1) {
+                clearInterval(pointerFetchingInterval);
+                pointerFetchingInterval = -1;
+            }
+            pointer.style.display = 'none';
+        }
+
+        function startPointerFetching() {
+            if (pointerFetchingInterval !== -1) return; // Already running
+            let previousVisible = 0;
+            const pointer = document.getElementById('pointer');
+            const img = document.getElementById('root');
+            pointerFetchingInterval = setInterval(async () => {
+                try {
+                    const [x, y, d] = await getPointerData();
+                    if (d != previousVisible) {
+                        previousVisible = d;
+                        pointer.style.display = d ? 'block' : 'none';
+                    }
+                    if (!d) return;
+
+                    let rect = img.getBoundingClientRect();
+                    let pX, pY;
+
+                    switch (rotation) {
+                        case 0:
+                            pX = rect.left + ((x / 100) * rect.width);
+                            pY = rect.top + ((y / 100) * rect.height);
+                            break;
+                        case 90:
+                            pX = rect.left + (((100 - y) / 100) * rect.width);
+                            pY = rect.top + ((x / 100) * rect.height);
+                            break;
+                        case 180:
+                            pX = rect.left + (((100 - x) / 100) * rect.width);
+                            pY = rect.top + (((100 - y) / 100) * rect.height);
+                            break;
+                        case 270:
+                            pX = rect.left + ((y / 100) * rect.width);
+                            pY = rect.top + (((100 - x) / 100) * rect.height);
+                            break;
+                    }
+
+                    pointer.style.left = pX + 'px';
+                    pointer.style.top = pY + 'px';
+                } catch (ex) {}
+            }, 20);
+        }
+
+        window.onload = () => {
+            startPointerFetching();
+            const img = document.getElementById('root');
+            setInterval(() => {
+                img.src = '/image?r=' + Math.random();
+            }, 100);
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,18 @@
+[package]
+name = "stream2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+lazy_static = "1.5.0"
+libc = "0.2.169"
+png = "0.17.16"
+rand = "0.8.5"
+routerify = "3"
+hyper = "0.14"
+tokio = { version = "1", features = ["full"] }
+sysinfo = "0.33.1"
+appload-client = { path = "rmpp-appload/backend-clients/rust-backend" }
+async-trait = "0.1.85"
+evdev = { version = "0.13.0", features = ["tokio"] }

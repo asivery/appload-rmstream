@@ -1,0 +1,8 @@
+{
+    "name": "RMStream",
+    "loadsBackend": true,
+    "entry": "/ui/main.qml",
+    "id": "rmstream",
+    "supportsScaling": false,
+    "canHaveMultipleFrontends": false
+}
