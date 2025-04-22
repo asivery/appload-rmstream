@@ -18,7 +18,9 @@ use tokio::time::sleep;
 use warp::Filter;
 use futures::{SinkExt, StreamExt};
 
-const SCREEN_POLL_RATE: u64 = 20;
+const SCREEN_POLL_RATE: Duration = Duration::from_millis(20);
+const DELTA_PNG_THRESHOLD: usize = 1_200_000;
+const SLEEP_AFTER_PNG_TRANSMISSION: Duration = Duration::from_millis(1500);
 const PORT: u16 = 3000;
 
 struct ImageDelta {
@@ -83,8 +85,9 @@ async fn update_pointer_pos_forever() -> Result<()>{
 async fn get_current_screen_as_png() -> Result<Vec<u8>> {
     let device_type = detect_device().unwrap();
     let device_info = get_device_info(device_type);
-    let mut out = vec![0u8; device_info.fb_size]; // Worst-case scenario
+    let mut out = vec![0u8; device_info.fb_size + 1]; // Worst-case scenario
     let mut c = Cursor::new(&mut *out);
+    c.write_all(&[3u8]).unwrap();
     let mut w = BufWriter::new(&mut c);
 
     let mut encoder = png::Encoder::new(&mut w, device_info.width, device_info.height);
@@ -106,7 +109,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
     let mut data = vec![0u8; device_info.fb_size];
     *IMAGE_DATA.lock().await = vec![0u8; device_info.fb_size];
     loop {
-        sleep(Duration::from_millis(SCREEN_POLL_RATE)).await;
+        sleep(SCREEN_POLL_RATE).await;
         if unsafe { libc::lseek(mem_fd.as_raw_fd(), position as libc::off_t, libc::SEEK_SET) } == -1
         {
             bail!("Failed to read memory!");
@@ -128,6 +131,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
         let mut deltas = Vec::new();
 
         let mut current_delta = None;
+        let mut abandon_deltas = false;
         for (i, (old, new)) in global_ref.iter().zip(&data).enumerate() {
             match (*old == *new, current_delta.is_none()) {
                 (true, true) => {},
@@ -142,6 +146,11 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
                     // There's no difference, and we're in a delta => Finish delta.
                     deltas.extend_from_slice(&current_delta.unwrap().serialize());
                     current_delta = None;
+                    if deltas.len() > DELTA_PNG_THRESHOLD {
+                        // It's not worth it to send it as deltas.
+                        abandon_deltas = true;
+                        break;
+                    }
                 },
                 (false, false) => {
                     // No changes, and delta exists => Append to delta
@@ -149,12 +158,21 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
                 }
             }
         }
+        // Update the global reference.
+        global_ref.copy_from_slice(&data);
+        drop(global_ref);
+
+        if abandon_deltas {
+            println!("Abandonning deltas. Sending PNG instead!");
+            if let Ok(_) = CHANGES_BROADCASTER.lock().await.send(get_current_screen_as_png().await.unwrap()) {
+                sleep(SLEEP_AFTER_PNG_TRANSMISSION).await;
+            }
+            continue;
+        }
         // If there's a leftover delta, push it
         if let Some(delta) = current_delta {
             deltas.extend_from_slice(&delta.serialize());
         }
-        // Update the global reference.
-        global_ref.copy_from_slice(&data);
         // Compress and broadcast deltas
         if deltas.len() > 0 {
             let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
@@ -179,19 +197,35 @@ fn run_server() {
         .run(([0, 0, 0, 0], PORT)));
 }
 
-async fn websocket_handler(websocket: warp::ws::WebSocket) {
+async fn get_config_packet() -> Vec<u8> {
     let device_type = detect_device().unwrap();
     let device_info = get_device_info(device_type);
 
+    let mut config = vec![0u8];
+    config.extend_from_slice(&device_info.width.to_be_bytes());
+    config.extend_from_slice(&device_info.height.to_be_bytes());
+    config
+}
+
+async fn websocket_handler(websocket: warp::ws::WebSocket) {
+
     let (mut sender, mut _receiver) = websocket.split();
+    // Encode initial resolution-preparing packet
+    if let Err(e) = {
+        match sender.send(warp::ws::Message::binary(get_config_packet().await)).await {
+            Ok(_) => {
+                sender.flush().await
+            }
+            e => e
+        }
+    } {
+        println!("Error while flushing the config packet. Disconnecting the client: {:?}", e);
+        return;
+    }
+
     // Encode initial PNG data.
     if let Err(e) = {
-        let png_data = get_current_screen_as_png().await.unwrap();
-        let mut initial_data = Vec::new();
-        initial_data.extend_from_slice(&device_info.width.to_be_bytes());
-        initial_data.extend_from_slice(&device_info.height.to_be_bytes());
-        initial_data.extend_from_slice(&png_data);
-        match sender.send(warp::ws::Message::binary(initial_data)).await {
+        match sender.send(warp::ws::Message::binary(get_current_screen_as_png().await.unwrap())).await {
             Ok(_) => {
                 sender.flush().await
             }

@@ -136,10 +136,10 @@
             const pointer = document.getElementById('pointer');
             const toggleText = document.getElementById('cursorToggleText');
             if (cursorEnabled) {
-                startPointerFetching();
+                pointer.style.visibility = '';
                 toggleText.innerText = 'Disable Cursor';
             } else {
-                stopPointerFetching();
+                pointer.style.visibility = 'hidden';
                 toggleText.innerText = 'Enable Cursor';
             }
         }
@@ -247,28 +247,23 @@
 
         window.onload = () => {
             const webSocket = new WebSocket("/ws");
-            let initialized = false;
             webSocket.onclose = () => {
                 root.remove();
                 alert("Disconnected!");
             };
             webSocket.onmessage = async message => {
-                const data = await message.data.bytes()
+                const data = new Uint8Array(await message.data.arrayBuffer());
                 const i32 = _i32.bind(null, data);
-                if(initialized) {
-                    if(data[0] == 1) {
-                        await handleDeltas(data.slice(1));
-                    } else if(data[0] == 2) {
-                        updatePointer(i32(0 + 1), i32(4 + 1), i32(8 + 1));
-                    } else {
-                        console.log("Unsupported packet: ", data);
-                    }
-                } else {
-                    // PNG
-                    width = i32(0);
-                    height = i32(4);
+                if(data[0] == 0) {
+                    width = i32(1);
+                    height = i32(5);
                     root.width = width;
                     root.height = height;
+                } else if(data[0] == 1) {
+                    await handleDeltas(data.slice(1));
+                } else if(data[0] == 2) {
+                    updatePointer(i32(0 + 1), i32(4 + 1), i32(8 + 1));
+                } else if(data[0] == 3) {
                     context = root.getContext('2d');
                     let image = new Image();
                     let promise = new Promise(res => {
@@ -276,14 +271,14 @@
                             res();
                         }
                     });
-                    const blob = new Blob([data.slice(8)], { type: 'image/png' });
+                    const blob = new Blob([data.slice(1)], { type: 'image/png' });
                     image.src = URL.createObjectURL(blob);
                     await promise;
 
                     context.drawImage(image, 0, 0);
                     imageData = new Uint8ClampedArray(context.getImageData(0, 0, width, height).data);
-
-                    initialized = true;
+                } else {
+                    console.log("Unsupported packet: ", data);
                 }
             }
         }
