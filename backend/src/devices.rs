@@ -2,7 +2,7 @@ pub struct Device {
     pub width: u32,
     pub height: u32,
     pub fb_size: usize,
-    pub image_data_translator: fn(&mut Vec<u8>),
+    pub image_data_translator: fn(&mut [u8]),
     pub digitizer_path: &'static str,
     pub digitizer_data_translator: fn(i32, i32, i32) -> (i32, i32, i32),
 }
@@ -12,13 +12,13 @@ pub enum ReMarkableDevice {
     PaperPro,
 }
 
-fn rmpp_image_data_translator(data: &mut Vec<u8>) {
+fn rmpp_image_data_translator(data: &mut [u8]) {
     for i in 0..(1624 * 2154) {
         let a = data[4 * i + 2];
         let b = data[4 * i + 1];
-        let c = data[4 * i + 0];
+        let c = data[4 * i];
         let d = data[4 * i + 3];
-        data[4 * i + 0] = a;
+        data[4 * i] = a;
         data[4 * i + 1] = b;
         data[4 * i + 2] = c;
         data[4 * i + 3] = d;

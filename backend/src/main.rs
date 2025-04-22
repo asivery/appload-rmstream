@@ -99,7 +99,6 @@ async fn get_current_screen_as_png() -> Result<Vec<u8>> {
         .write_image_data(&IMAGE_DATA.lock().await)?;
     drop(w);
     let size = c.position() as usize;
-    drop(c);
     Ok(out[0..size].to_vec())
 }
 
@@ -164,7 +163,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
 
         if abandon_deltas {
             println!("Abandonning deltas. Sending PNG instead!");
-            if let Ok(_) = CHANGES_BROADCASTER.lock().await.send(get_current_screen_as_png().await.unwrap()) {
+            if CHANGES_BROADCASTER.lock().await.send(get_current_screen_as_png().await.unwrap()).is_ok() {
                 sleep(SLEEP_AFTER_PNG_TRANSMISSION).await;
             }
             continue;
@@ -174,7 +173,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
             deltas.extend_from_slice(&delta.serialize());
         }
         // Compress and broadcast deltas
-        if deltas.len() > 0 {
+        if !deltas.is_empty() {
             let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(&deltas).unwrap();
             let final_size = deltas.len() as u32;
@@ -257,8 +256,8 @@ async fn websocket_handler(websocket: warp::ws::WebSocket) {
 
 async fn real_main(pid: u32, sender: BackendReplier<MyBackend>) -> Result<()>{
     println!("Initializing rmStream...");
-    if let None = detect_device() {
-        sender.send_message(2, "The device you're using is not compatible!".into()).unwrap();
+    if detect_device().is_none() {
+        sender.send_message(2, "The device you're using is not compatible!").unwrap();
         println!("Device is not compatible!");
         return Ok(());
     }
@@ -278,7 +277,7 @@ async fn real_main(pid: u32, sender: BackendReplier<MyBackend>) -> Result<()>{
         run_server();
         Ok(())
     } else {
-        sender.send_message(2, "No framebuffer-spy installed".into()).unwrap();
+        sender.send_message(2, "No framebuffer-spy installed").unwrap();
         Ok(())
     }
 }
@@ -314,8 +313,7 @@ async fn main() {
     let mut system = sysinfo::System::new();
     system.refresh_all();
     let pid = system
-        .processes_by_name("xochitl".as_ref())
-        .nth(0)
+        .processes_by_name("xochitl".as_ref()).next()
         .unwrap()
         .pid()
         .as_u32();
@@ -324,7 +322,7 @@ async fn main() {
         .iter()
         .flat_map(|e| e.1.ip_networks().iter().map(|e| e.addr))
         .filter(|e| e.is_ipv4() && !e.is_loopback())
-        .map(|e| format!("http://{}:{}", e.to_string(), PORT))
+        .map(|e| format!("http://{}:{}", e, PORT))
         .collect::<Vec<_>>();
 
     let backend = MyBackend {
