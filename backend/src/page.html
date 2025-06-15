@@ -144,12 +144,6 @@
             }
         }
 
-        async function getPointerData() {
-            return (await (await fetch('/pointer')).text()).split(' ').map(e => parseInt(e));
-        }
-
-        let pointerFetchingInterval = -1;
-
         function stopPointerFetching() {
             const pointer = document.getElementById('pointer');
             if (pointerFetchingInterval !== -1) {
