@@ -4,7 +4,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Cursor, Write};
 use std::os::fd::AsRawFd;
 use std::time::Duration;
-use std::time::SystemTime;
 
 use anyhow::{bail, Result};
 use appload_client::{AppLoad, AppLoadBackend, BackendReplier, Message, MSG_SYSTEM_NEW_COORDINATOR};
@@ -52,21 +51,21 @@ async fn update_pointer_pos_forever() -> Result<()>{
     let mut x: i32 = 0;
     let mut y: i32 = 0;
     let mut d: i32 = 0;
-    let mut time = SystemTime::now();
+    let mut previous_packet = Vec::default();
     loop {
         let event = evdev_device.next_event().await?;
         match event.destructure() {
             EventSummary::Synchronization(_, SynchronizationCode::SYN_REPORT, _) => {
                 // Flush to the global structures
-                if time.elapsed().unwrap().as_millis() < 20 {
-                    continue;
-                }
-                time = SystemTime::now();
                 let values = (device_info.digitizer_data_translator)(x, y, d);
                 let mut packet = vec![2u8];
                 packet.extend_from_slice(&values.0.to_be_bytes());
                 packet.extend_from_slice(&values.1.to_be_bytes());
                 packet.extend_from_slice(&values.2.to_be_bytes());
+                if packet == previous_packet {
+                    continue;
+                }
+                previous_packet = packet.clone();
                 let _ = CHANGES_BROADCASTER.lock().await.send(packet);
             }
             EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_X, value) => {
