@@ -13,7 +13,7 @@ pub enum ReMarkableDevice {
 }
 
 fn rmpp_image_data_translator(data: &mut [u8]) {
-    for i in 0..(1624 * 2154) {
+    for i in 0..(1632 * 2154) {
         let a = data[4 * i + 2];
         let b = data[4 * i + 1];
         let c = data[4 * i];
@@ -36,9 +36,9 @@ fn rmpp_digitizer_translator(x: i32, y: i32, d: i32) -> (i32, i32, i32) {
 pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
     match r#type {
         ReMarkableDevice::PaperPro => Device {
-            fb_size: 1624 * 2154 * 4,
+            fb_size: 1632 * 2154 * 4,
             height: 2154,
-            width: 1624,
+            width: 1632,
             image_data_translator: rmpp_image_data_translator,
             digitizer_path: "/dev/input/event2",
             digitizer_data_translator: rmpp_digitizer_translator,
