@@ -1,7 +1,7 @@
 #!/bin/bash
 DEST=build/rmstream-rmpp
 rm -rf $DEST
-mkdir $DEST/backend -p
+mkdir -p $DEST/backend
 cp icon.png manifest.json $DEST/
 rcc --binary -o $DEST/resources.rcc application.qrc
 cd backend
