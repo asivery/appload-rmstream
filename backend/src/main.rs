@@ -111,7 +111,8 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
     let device_type = detect_device().unwrap();
     let device_info = get_device_info(device_type);
     let mut data = vec![0u8; device_info.fb_size];
-    *IMAGE_DATA.lock().await = vec![0u8; device_info.fb_size];
+    let mut temp_buffer = vec![0u8; (device_info.width * device_info.height * 4) as usize];
+    *IMAGE_DATA.lock().await = vec![0u8; (device_info.width * device_info.height * 4) as usize];
     loop {
         sleep(SCREEN_POLL_RATE).await;
         if unsafe { libc::lseek(mem_fd.as_raw_fd(), position as libc::off_t, libc::SEEK_SET) } == -1
@@ -128,7 +129,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
         if read_bytes != device_info.fb_size as isize {
             bail!("Failed to read memory!");
         }
-        (device_info.image_data_translator)(&mut data);
+        (device_info.image_data_translator)(&data, &mut temp_buffer);
 
         // Encode deltas
         let mut global_ref = IMAGE_DATA.lock().await;
@@ -136,7 +137,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
 
         let mut current_delta = None;
         let mut abandon_deltas = false;
-        for (i, (old, new)) in global_ref.iter().zip(&data).enumerate() {
+        for (i, (old, new)) in global_ref.iter().zip(&temp_buffer).enumerate() {
             match (*old == *new, current_delta.is_none()) {
                 (true, true) => {},
                 (false, true) => {
@@ -163,7 +164,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
             }
         }
         // Update the global reference.
-        global_ref.copy_from_slice(&data);
+        global_ref.copy_from_slice(&temp_buffer);
         drop(global_ref);
 
         if abandon_deltas {
