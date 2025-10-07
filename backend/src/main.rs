@@ -57,7 +57,7 @@ async fn update_pointer_pos_forever() -> Result<()>{
         match event.destructure() {
             EventSummary::Synchronization(_, SynchronizationCode::SYN_REPORT, _) => {
                 // Flush to the global structures
-                let values = (device_info.digitizer_data_translator)(x, y, d);
+                let values = (device_info.digitizer_data_translator)(&device_info, x, y, d);
                 let mut packet = vec![2u8];
                 packet.extend_from_slice(&values.0.to_be_bytes());
                 packet.extend_from_slice(&values.1.to_be_bytes());
@@ -129,7 +129,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
         if read_bytes != device_info.fb_size as isize {
             bail!("Failed to read memory!");
         }
-        (device_info.image_data_translator)(&data, &mut temp_buffer);
+        (device_info.image_data_translator)(&device_info, &data, &mut temp_buffer);
 
         // Encode deltas
         let mut global_ref = IMAGE_DATA.lock().await;
