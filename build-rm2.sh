@@ -1,5 +1,5 @@
 #!/bin/bash
-DEST=build/rmstream-rm2
+DEST=build/rmstream-arm32
 rm -rf $DEST
 mkdir -p $DEST/backend
 cp icon.png manifest.json $DEST/

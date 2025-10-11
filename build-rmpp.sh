@@ -1,5 +1,5 @@
 #!/bin/bash
-DEST=build/rmstream-rmpp
+DEST=build/rmstream-aarch64
 rm -rf $DEST
 mkdir -p $DEST/backend
 cp icon.png manifest.json $DEST/
