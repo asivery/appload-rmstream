@@ -36,6 +36,14 @@ fn rmpp_digitizer_translator(device: &Device, x: i32, y: i32, d: i32) -> (i32, i
     )
 }
 
+fn rm2_digitizer_translator(device: &Device, x: i32, y: i32, d: i32) -> (i32, i32, i32) {
+    (
+        (((device.max_digitizer_height - f64::from(y)) / device.max_digitizer_height) * 100.0) as i32,
+        ((f64::from(x) / device.max_digitizer_width) * 100.0) as i32,
+        i32::min(d, 1),
+    )
+}
+
 fn rgb565_image_data_translator(device: &Device, in_data: &[u8], out_data: &mut [u8]) {
     for i in 0..(device.width * device.height) as usize {
         let a = in_data[2 * i + 1] as u16;
@@ -80,10 +88,9 @@ pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
             image_data_translator: rgb565_image_data_translator,
             digitizer_path: "/dev/input/event1",
 
-            // FIXME:
-            digitizer_data_translator: rmpp_digitizer_translator, // should be the same,
-            max_digitizer_width: 11180.0,
-            max_digitizer_height: 15340.0,
+            digitizer_data_translator: rm2_digitizer_translator,
+            max_digitizer_width: 20967.0,
+            max_digitizer_height: 15725.0,
         },
     }
 }
