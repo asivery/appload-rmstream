@@ -38,8 +38,8 @@ fn rmpp_digitizer_translator(device: &Device, x: i32, y: i32, d: i32) -> (i32, i
 
 fn rm2_digitizer_translator(device: &Device, x: i32, y: i32, d: i32) -> (i32, i32, i32) {
     (
-        (((device.max_digitizer_height - f64::from(y)) / device.max_digitizer_height) * 100.0) as i32,
-        ((f64::from(x) / device.max_digitizer_width) * 100.0) as i32,
+        ((f64::from(y) / device.max_digitizer_height) * 100.0) as i32,
+        (((device.max_digitizer_width - f64::from(x)) / device.max_digitizer_width) * 100.0) as i32,
         i32::min(d, 1),
     )
 }
