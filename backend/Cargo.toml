@@ -11,7 +11,7 @@ png = "0.17.16"
 rand = "0.8.5"
 tokio = { version = "1", features = ["full"] }
 sysinfo = "0.33.1"
-appload-client = { path = "rmpp-appload/backend-clients/rust-backend" }
+appload-client = { path = "rmpp-appload/backends/appload-clients/rust-backend" }
 async-trait = "0.1.85"
 evdev = { version = "0.13.0", features = ["tokio"] }
 warp = "0.3.7"
