@@ -7,9 +7,11 @@ pub struct Device {
     pub digitizer_data_translator: fn(&Device, i32, i32, i32) -> (i32, i32, i32),
     pub max_digitizer_width: f64,
     pub max_digitizer_height: f64,
+    pub framebuffer_file: Option<&'static str>,
 }
 
 pub enum ReMarkableDevice {
+    RM1,
     RM2,
     PaperPro,
     PaperProMove,
@@ -44,6 +46,14 @@ fn rm2_digitizer_translator(device: &Device, x: i32, y: i32, d: i32) -> (i32, i3
     )
 }
 
+fn rm1_digitizer_translator(device: &Device, x: i32, y: i32, _d: i32) -> (i32, i32, i32) {
+    (
+        ((f64::from(y) / device.max_digitizer_width) * 100.0) as i32,
+        (((device.max_digitizer_height - f64::from(x)) / device.max_digitizer_height) * 100.0) as i32,
+        1,
+    )
+}
+
 fn rgb565_image_data_translator(device: &Device, in_data: &[u8], out_data: &mut [u8]) {
     for i in 0..(device.width * device.height) as usize {
         let a = in_data[2 * i + 1] as u16;
@@ -70,6 +80,7 @@ pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
             digitizer_data_translator: rmpp_digitizer_translator,
             max_digitizer_width: 11180.0,
             max_digitizer_height: 15340.0,
+            framebuffer_file: None,
         },
         ReMarkableDevice::PaperProMove => Device {
             fb_size: 960 * 1696 * 4,
@@ -80,6 +91,7 @@ pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
             digitizer_data_translator: rmpp_digitizer_translator,
             max_digitizer_width: 6760.0,
             max_digitizer_height: 11960.0,
+            framebuffer_file: None,
         },
         ReMarkableDevice::RM2 => Device {
             fb_size: 1872 * 1404 * 2,
@@ -91,6 +103,19 @@ pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
             digitizer_data_translator: rm2_digitizer_translator,
             max_digitizer_width: 20967.0,
             max_digitizer_height: 15725.0,
+            framebuffer_file: None,
+        },
+        ReMarkableDevice::RM1 => Device {
+            fb_size: 1872 * 1408 * 2,
+            height: 1872,
+            width: 1408,
+            image_data_translator: rgb565_image_data_translator,
+            digitizer_path: "/dev/input/event0",
+
+            digitizer_data_translator: rm1_digitizer_translator,
+            max_digitizer_width: 15725.0,
+            max_digitizer_height: 20967.0,
+            framebuffer_file: Some("/dev/fb0"),
         },
     }
 }
@@ -106,6 +131,6 @@ pub fn detect_device() -> Option<ReMarkableDevice> {
     } else if device_type_file.contains("2.0") {
         Some(ReMarkableDevice::RM2)
     } else {
-        None
+        Some(ReMarkableDevice::RM1)
     }
 }

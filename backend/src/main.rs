@@ -262,30 +262,43 @@ async fn websocket_handler(websocket: warp::ws::WebSocket) {
 
 async fn real_main(pid: u32, sender: BackendReplier<MyBackend>) -> Result<()>{
     println!("Initializing rmStream...");
-    if detect_device().is_none() {
-        sender.send_message(2, "The device you're using is not compatible!").unwrap();
-        println!("Device is not compatible!");
-        return Ok(());
-    }
-    eprintln!("Opening xochitl's memory");
-    let mem_fd = OpenOptions::new()
-        .read(true)
-        .open(format!("/proc/{}/mem", pid))?;
+    let device = match detect_device() {
+        Some(dev) => get_device_info(dev),
+        None => {
+            sender.send_message(2, "The device you're using is not compatible!").unwrap();
+            println!("Device is not compatible!");
+            return Ok(());
+        }
+    };
 
-    if let Ok(framebuffer_address) = std::env::var("FRAMEBUFFER_SPY_EXTENSION_FBADDR") {
-        eprintln!("Framebuffer is at {} according to framebuffer-spy", &framebuffer_address);
+    let (file, offset) = if let Some(framebuffer_file) = device.framebuffer_file {
+        let fb0_fd = OpenOptions::new()
+            .read(true)
+            .open(framebuffer_file)?;
 
-        tokio::spawn(broadcast_changes_forever(mem_fd, usize::from_str_radix(&framebuffer_address[2..], 16).unwrap()));
-        tokio::spawn(update_pointer_pos_forever());
-
-        sender.backend.lock().await.ready = true;
-        sender.send_message(1, "ready").unwrap();
-        run_server();
-        Ok(())
+        (fb0_fd, 0)
     } else {
-        sender.send_message(2, "No framebuffer-spy installed").unwrap();
-        Ok(())
-    }
+        eprintln!("Opening xochitl's memory");
+        let mem_fd = OpenOptions::new()
+            .read(true)
+            .open(format!("/proc/{}/mem", pid))?;
+        if let Ok(framebuffer_address) = std::env::var("FRAMEBUFFER_SPY_EXTENSION_FBADDR") {
+            eprintln!("Framebuffer is at {} according to framebuffer-spy", &framebuffer_address);
+
+            (mem_fd, usize::from_str_radix(&framebuffer_address[2..], 16).unwrap())
+        } else {
+            sender.send_message(2, "No framebuffer-spy installed").unwrap();
+            return Ok(())
+        }
+    };
+
+    tokio::spawn(broadcast_changes_forever(file, offset));
+    tokio::spawn(update_pointer_pos_forever());
+
+    sender.backend.lock().await.ready = true;
+    sender.send_message(1, "ready").unwrap();
+    run_server();
+    Ok(())
 }
 
 
