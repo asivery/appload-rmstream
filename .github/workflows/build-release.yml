@@ -1,4 +1,4 @@
-name: Build with RMPP Toolchain and Upload Releases
+name: Build and Upload Releases
 
 on:
   push:
@@ -11,11 +11,13 @@ jobs:
         os: ["eeems/remarkable-toolchain:latest-rmpp", "eeems/remarkable-toolchain:latest-rm1"]
         include:
           - os: "eeems/remarkable-toolchain:latest-rmpp"
-            arch: aarch64-unknown-linux-gnu
+            rust_arch: aarch64-unknown-linux-gnu
+            linker: gcc-aarch64-linux-gnu
             artifact_name: rmstream-aarch64
             script: build-rmpp.sh
           - os: "eeems/remarkable-toolchain:latest-rm1"
-            arch: armv7-unknown-linux-gnueabihf
+            rust_arch: armv7-unknown-linux-gnueabihf
+            linker: gcc-arm-linux-gnueabihf
             artifact_name: rmstream-arm32
             script: build-rm2.sh
     runs-on: ubuntu-latest
@@ -29,41 +31,21 @@ jobs:
           with:
             submodules: true
 
-        # Most of these dependencies are probably overkill.
-        # https://askubuntu.com/a/1460243
-        # https://forum.qt.io/topic/90472/unknown-module-s-in-qt-quickcontrols2/3
-        # https://stackoverflow.com/a/39397382
-        - name: Install QMake
-          run: >-
+        - name: Install rcc
+          run: |
             apt-get update
 
-            apt-get install -y
-            qt5-qmake
-            qtbase5-dev
-            qtbase5-dev-tools
-            libqt5svg5-dev
-            libqt5webenginewidgets5
-            libqt5webchannel5-dev
-            qtwebengine5-dev
-            qt6-base-dev
-            libgles2-mesa-dev
-            qtquickcontrols2-5-dev
-            qtdeclarative5-dev
-            qt6-declarative-dev
-            gcc-aarch64-linux-gnu
-            zip
+            apt-get install -y \
+              qt6-base-dev \
+              qt6-base-dev-tools \
+              ${{ matrix.linker }}
 
-            qtchooser -install qt6 $(which qmake6)
-
-            export QT_SELECT=qt6
-
-        # Source the rm toolchain ". /opt/codex/*/*/environment-setup-*"
         - name: Build Application
           run: |
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > install
             sh install -y
             . "$HOME/.cargo/env"
-            rustup target add ${{ matrix.arch }}
+            rustup target add ${{ matrix.rust_arch }}
             . /opt/codex/*/*/environment-setup-*
             chmod a+x ./${{ matrix.script }}
             ./${{ matrix.script }}
@@ -71,13 +53,14 @@ jobs:
         - name: Copy artifacts
           run: |
             cd build
-            zip -r -o ${{ matrix.artifact_name }}.zip *
+            mv ${{ matrix.artifact_name }} rmstream
+            tar -czf rmstream.tar.gz rmstream
 
         - name: Upload Build Artifact
           uses: actions/upload-artifact@v4
           with:
-            name: ${{ matrix.artifact_name }}.zip
-            path: ./build
+            name: ${{ matrix.artifact_name }}
+            path: ./build/rmstream.tar.gz
 
   release:
     runs-on: ubuntu-latest
@@ -99,22 +82,22 @@ jobs:
             release_name: ${{ github.event.release.tag_name }}
             tag_name: ${{ github.ref }}
 
-        - name: Upload Release Assets
+        - name: Upload Release Assets (aarch64)
           uses: actions/upload-release-asset@v1
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           with:
             upload_url: ${{ steps.create_release_step.outputs.upload_url }}
-            asset_path: rmstream-aarch64.zip/rmstream-aarch64.zip
-            asset_name: rmstream-aarch64.zip
+            asset_path: rmstream-aarch64/rmstream.tar.gz
+            asset_name: rmstream-aarch64.tar.gz
             asset_content_type: application/octet-stream
 
-        - name: Upload Release Assets (ARM32)
+        - name: Upload Release Assets (arm32)
           uses: actions/upload-release-asset@v1
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           with:
             upload_url: ${{ steps.create_release_step.outputs.upload_url }}
-            asset_path: rmstream-arm32.zip/rmstream-arm32.zip
-            asset_name: rmstream-arm32.zip
+            asset_path: rmstream-arm32/rmstream.tar.gz
+            asset_name: rmstream-arm32.tar.gz
             asset_content_type: application/octet-stream
