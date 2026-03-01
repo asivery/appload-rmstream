@@ -59,12 +59,15 @@ fn rgb565_image_data_translator(device: &Device, in_data: &[u8], out_data: &mut 
         let a = in_data[2 * i + 1] as u16;
         let b = in_data[2 * i] as u16;
         let total = (a << 8) | b;
-        let r = ((total >> 11) as u8 & 0b11111) << 3;
-        let g = ((total >> 5) as u8 & 0b111111) << 2;
-        let b = ((total >> 0) as u8 & 0b11111) << 3;
-        out_data[4 * i] = r;
-        out_data[4 * i + 1] = g;
-        out_data[4 * i + 2] = b;
+        let r5 = (total >> 11) & 0x1F;
+        let g6 = (total >> 5) & 0x3F;
+        let b5 = total & 0x1F;
+        let r8 = ((r5 * 255) / 31) as u8;
+        let g8 = ((g6 * 255) / 63) as u8;
+        let b8 = ((b5 * 255) / 31) as u8;
+        out_data[4 * i] = r8;
+        out_data[4 * i + 1] = g8;
+        out_data[4 * i + 2] = b8;
         out_data[4 * i + 3] = 0xFF;
     }
 }
