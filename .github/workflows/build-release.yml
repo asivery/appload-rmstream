@@ -8,14 +8,14 @@ jobs:
   build:
     strategy:
       matrix:
-        os: ["eeems/remarkable-toolchain:latest-rmpp", "eeems/remarkable-toolchain:latest-rm2"]
+        os: ["eeems/remarkable-toolchain:latest-rmpp", "eeems/remarkable-toolchain:latest-rm1"]
         include:
           - os: "eeems/remarkable-toolchain:latest-rmpp"
             rust_arch: aarch64-unknown-linux-gnu
             linker: gcc-aarch64-linux-gnu
             artifact_name: rmstream-aarch64
             script: build-rmpp.sh
-          - os: "eeems/remarkable-toolchain:latest-rm2"
+          - os: "eeems/remarkable-toolchain:latest-rm1"
             rust_arch: armv7-unknown-linux-gnueabihf
             linker: gcc-arm-linux-gnueabihf
             artifact_name: rmstream-arm32
