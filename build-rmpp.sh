@@ -3,7 +3,7 @@ DEST=build/rmstream-aarch64
 rm -rf $DEST
 mkdir -p $DEST/backend
 cp icon.png manifest.json $DEST/
-rcc --binary -o $DEST/resources.rcc application.qrc
+/usr/lib/qt6/libexec/rcc --binary -o $DEST/resources.rcc application.qrc
 cd backend
 cargo build --release --target aarch64-unknown-linux-gnu
 cd ..
