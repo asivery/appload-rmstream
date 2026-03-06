@@ -1,4 +1,7 @@
 #!/bin/bash
+
+set -e
+
 DEST=build/rmstream-arm32
 rm -rf $DEST
 mkdir -p $DEST/backend
