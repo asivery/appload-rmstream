@@ -1,6 +1,7 @@
 import QtQuick 2.5
 import QtQuick.Controls 2.5
 import net.asivery.AppLoad 1.0
+import net.asivery.XoviMessageBroker 2.0
 
 Rectangle {
     id: root
@@ -23,9 +24,21 @@ Rectangle {
                 let toks = contents.split(",");
                 ips = toks.slice(1, toks.length);
                 ready = toks[0] == '1' || toks[0] == 'true';
+            } else if(type == 3) {
+                sendInit();
             }
             mainText = `The service is hosted on:\n${ips.map(e => '- ' + e).join('\n')}\nThe service is${ready ? '' : ' NOT'} running.`;
         }
+    }
+
+    XoviMessageBroker {
+        id: broker
+        listeningFor: []
+    }
+
+    Component.onCompleted: sendInit()
+    function sendInit() {
+        endpoint.sendMessage(100, broker.sendSimpleSignal("framebuffer-spy$getConfigString", ""));
     }
 
     signal close

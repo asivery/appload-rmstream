@@ -1,4 +1,5 @@
 mod devices;
+mod framebuffer_spy;
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Cursor, Write};
@@ -17,6 +18,9 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::sleep;
 use warp::Filter;
 use futures::{SinkExt, StreamExt};
+
+use crate::devices::FramebufferConfig;
+use crate::framebuffer_spy::FramebufferSpyConfig;
 
 const SCREEN_POLL_RATE: Duration = Duration::from_millis(20);
 const DELTA_PNG_THRESHOLD: usize = 1_200_000;
@@ -87,15 +91,13 @@ async fn update_pointer_pos_forever() -> Result<()>{
     }
 }
 
-async fn get_current_screen_as_png() -> Result<Vec<u8>> {
-    let device_type = detect_device().unwrap();
-    let device_info = get_device_info(device_type);
-    let mut out = vec![0u8; device_info.fb_size + 1]; // Worst-case scenario
+async fn get_current_screen_as_png(framebuffer_config: &FramebufferConfig) -> Result<Vec<u8>> {
+    let mut out = vec![0u8; framebuffer_config.fb_size + 1]; // Worst-case scenario
     let mut c = Cursor::new(&mut *out);
     c.write_all(&[3u8]).unwrap();
     let mut w = BufWriter::new(&mut c);
 
-    let mut encoder = png::Encoder::new(&mut w, device_info.width, device_info.height);
+    let mut encoder = png::Encoder::new(&mut w, framebuffer_config.width, framebuffer_config.height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder
@@ -107,15 +109,13 @@ async fn get_current_screen_as_png() -> Result<Vec<u8>> {
     Ok(out[0..size].to_vec())
 }
 
-async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> {
-    let device_type = detect_device().unwrap();
-    let device_info = get_device_info(device_type);
-    let mut data = vec![0u8; device_info.fb_size];
-    let mut temp_buffer = vec![0u8; (device_info.width * device_info.height * 4) as usize];
-    *IMAGE_DATA.lock().await = vec![0u8; (device_info.width * device_info.height * 4) as usize];
+async fn broadcast_changes_forever(mem_fd: File, config: &FramebufferConfig) -> Result<()> {
+    let mut data = vec![0u8; config.fb_size];
+    let mut temp_buffer = vec![0u8; (config.width * config.height * 4) as usize];
+    *IMAGE_DATA.lock().await = vec![0u8; (config.width * config.height * 4) as usize];
     loop {
         sleep(SCREEN_POLL_RATE).await;
-        if unsafe { libc::lseek(mem_fd.as_raw_fd(), position as libc::off_t, libc::SEEK_SET) } == -1
+        if unsafe { libc::lseek(mem_fd.as_raw_fd(), config.address as libc::off_t, libc::SEEK_SET) } == -1
         {
             bail!("Failed to read memory!");
         }
@@ -123,13 +123,13 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
             libc::read(
                 mem_fd.as_raw_fd(),
                 data.as_mut_ptr() as *mut libc::c_void,
-                device_info.fb_size,
+                config.fb_size,
             )
         };
-        if read_bytes != device_info.fb_size as isize {
+        if read_bytes != config.fb_size as isize {
             bail!("Failed to read memory!");
         }
-        (device_info.image_data_translator)(&device_info, &data, &mut temp_buffer);
+        (config.image_data_translator)(&config, &data, &mut temp_buffer);
 
         // Encode deltas
         let mut global_ref = IMAGE_DATA.lock().await;
@@ -169,7 +169,7 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
 
         if abandon_deltas {
             println!("Abandonning deltas. Sending PNG instead!");
-            if CHANGES_BROADCASTER.lock().await.send(get_current_screen_as_png().await.unwrap()).is_ok() {
+            if CHANGES_BROADCASTER.lock().await.send(get_current_screen_as_png(config).await.unwrap()).is_ok() {
                 sleep(SLEEP_AFTER_PNG_TRANSMISSION).await;
             }
             continue;
@@ -191,10 +191,10 @@ async fn broadcast_changes_forever(mem_fd: File, position: usize) -> Result<()> 
     }
 }
 
-fn run_server() {
+fn run_server(fb_config: &'static FramebufferConfig) {
     let page = warp::path::end().map(|| warp::reply::html(include_str!("page.html")));
-    let ws_page = warp::path("ws").and(warp::ws()).map(|ws: warp::ws::Ws| {
-        ws.on_upgrade(websocket_handler)
+    let ws_page = warp::path("ws").and(warp::ws()).map(move |ws: warp::ws::Ws| {
+        ws.on_upgrade(move |ws| websocket_handler(fb_config, ws))
     });
     let routes = page.or(ws_page).with(warp::cors().allow_any_origin());
 
@@ -202,22 +202,18 @@ fn run_server() {
         .run(([0, 0, 0, 0], PORT)));
 }
 
-async fn get_config_packet() -> Vec<u8> {
-    let device_type = detect_device().unwrap();
-    let device_info = get_device_info(device_type);
-
+async fn get_config_packet(fb_config: &'static FramebufferConfig) -> Vec<u8> {
     let mut config = vec![0u8];
-    config.extend_from_slice(&device_info.width.to_be_bytes());
-    config.extend_from_slice(&device_info.height.to_be_bytes());
+    config.extend_from_slice(&fb_config.width.to_be_bytes());
+    config.extend_from_slice(&fb_config.height.to_be_bytes());
     config
 }
 
-async fn websocket_handler(websocket: warp::ws::WebSocket) {
-
+async fn websocket_handler(fb_config: &'static FramebufferConfig, websocket: warp::ws::WebSocket) {
     let (mut sender, mut _receiver) = websocket.split();
     // Encode initial resolution-preparing packet
     if let Err(e) = {
-        match sender.send(warp::ws::Message::binary(get_config_packet().await)).await {
+        match sender.send(warp::ws::Message::binary(get_config_packet(fb_config).await)).await {
             Ok(_) => {
                 sender.flush().await
             }
@@ -230,7 +226,7 @@ async fn websocket_handler(websocket: warp::ws::WebSocket) {
 
     // Encode initial PNG data.
     if let Err(e) = {
-        match sender.send(warp::ws::Message::binary(get_current_screen_as_png().await.unwrap())).await {
+        match sender.send(warp::ws::Message::binary(get_current_screen_as_png(fb_config).await.unwrap())).await {
             Ok(_) => {
                 sender.flush().await
             }
@@ -260,7 +256,7 @@ async fn websocket_handler(websocket: warp::ws::WebSocket) {
     println!("Client disconnected");
 }
 
-async fn real_main(pid: u32, sender: BackendReplier<MyBackend>) -> Result<()>{
+async fn real_main(pid: u32, sender: BackendReplier<MyBackend>, framebuffer_spy_config_string: String) -> Result<()>{
     println!("Initializing rmStream...");
     let device = match detect_device() {
         Some(dev) => get_device_info(dev),
@@ -271,33 +267,33 @@ async fn real_main(pid: u32, sender: BackendReplier<MyBackend>) -> Result<()>{
         }
     };
 
-    let (file, offset) = if let Some(framebuffer_file) = device.framebuffer_file {
+    let (file, framebuffer_config): (File, &'static FramebufferConfig) = if let Some(framebuffer_config) = device.override_framebuffer_config {
         let fb0_fd = OpenOptions::new()
             .read(true)
-            .open(framebuffer_file)?;
+            .open(framebuffer_config.framebuffer_file.unwrap())?;
 
-        (fb0_fd, 0)
+        (fb0_fd, framebuffer_config)
     } else {
         eprintln!("Opening xochitl's memory");
         let mem_fd = OpenOptions::new()
             .read(true)
             .open(format!("/proc/{}/mem", pid))?;
-        if let Ok(framebuffer_address) = std::env::var("FRAMEBUFFER_SPY_EXTENSION_FBADDR") {
-            eprintln!("Framebuffer is at {} according to framebuffer-spy", &framebuffer_address);
+        if let Ok(framebuffer_spy_config) = FramebufferSpyConfig::parse(&framebuffer_spy_config_string) {
+            eprintln!("Framebuffer config is {framebuffer_spy_config:?} according to framebuffer-spy");
 
-            (mem_fd, usize::from_str_radix(&framebuffer_address[2..], 16).unwrap())
+            (mem_fd, Box::leak(Box::new(FramebufferConfig::from(framebuffer_spy_config))))
         } else {
             sender.send_message(2, "No framebuffer-spy installed").unwrap();
             return Ok(())
         }
     };
 
-    tokio::spawn(broadcast_changes_forever(file, offset));
+    tokio::spawn(broadcast_changes_forever(file, framebuffer_config));
     tokio::spawn(update_pointer_pos_forever());
 
     sender.backend.lock().await.ready = true;
     sender.send_message(1, "ready").unwrap();
-    run_server();
+    run_server(framebuffer_config);
     Ok(())
 }
 
@@ -315,8 +311,13 @@ impl AppLoadBackend for MyBackend {
         match message.msg_type {
             MSG_SYSTEM_NEW_COORDINATOR => {
                 if !self.init {
+                    functionality.send_message(3, "").unwrap();
+                }
+            },
+            100 => {
+                if !self.init {
                     self.init = true;
-                    tokio::spawn(real_main(self.pid, functionality.clone()));
+                    tokio::spawn(real_main(self.pid, functionality.clone(), message.contents));
                 }
                 functionality.send_message(0, &format!("{},{}", self.ready, self.ip_addrs.join(","))).unwrap();
             }

@@ -1,14 +1,49 @@
+use crate::framebuffer_spy::FramebufferSpyConfig;
+
 pub struct Device {
-    pub width: u32,
-    pub height: u32,
-    pub fb_size: usize,
-    pub image_data_translator: fn(&Device, &[u8], &mut [u8]),
     pub digitizer_path: &'static str,
     pub digitizer_data_translator: fn(&Device, i32, i32, i32) -> (i32, i32, i32),
     pub max_digitizer_width: f64,
     pub max_digitizer_height: f64,
-    pub framebuffer_file: Option<&'static str>,
+    pub override_framebuffer_config: Option<&'static FramebufferConfig>,
 }
+
+pub struct FramebufferConfig {
+    pub framebuffer_file: Option<&'static str>,
+    pub address: usize,
+    pub width: u32,
+    pub height: u32,
+    pub fb_size: usize,
+    pub image_data_translator: fn(&FramebufferConfig, &[u8], &mut [u8]),
+}
+
+impl From<FramebufferSpyConfig> for FramebufferConfig {
+    fn from(value: FramebufferSpyConfig) -> Self {
+        let (pixel_size, image_data_translator): (u32, fn(&FramebufferConfig, &[u8], &mut [u8])) = match value.r#type {
+            2 => (4, rgba_image_data_translator),
+            1 => (2, rgb565_image_data_translator),
+            _ => panic!()
+        };
+        let fb_size = (value.bpl * value.height) as usize;
+        Self {
+            framebuffer_file: None,
+            address: value.address,
+            fb_size,
+            height: value.height,
+            image_data_translator,
+            width: value.bpl / pixel_size
+        }
+    }
+}
+
+pub const RM1_FRAMEBUFFER_CONFIG: FramebufferConfig = FramebufferConfig {
+    framebuffer_file: Some("/dev/fb0"),
+    address: 0,
+    fb_size: 1872 * 1408 * 2,
+    height: 1872,
+    width: 1408,
+    image_data_translator: rgb565_image_data_translator,
+};
 
 pub enum ReMarkableDevice {
     RM1,
@@ -17,8 +52,8 @@ pub enum ReMarkableDevice {
     PaperProMove,
 }
 
-fn rgba_image_data_translator(device: &Device, in_data: &[u8], out_data: &mut [u8]) {
-    for i in 0..(device.width * device.height) as usize {
+fn rgba_image_data_translator(config: &FramebufferConfig, in_data: &[u8], out_data: &mut [u8]) {
+    for i in 0..(config.width * config.height) as usize {
         let a = in_data[4 * i + 2];
         let b = in_data[4 * i + 1];
         let c = in_data[4 * i];
@@ -49,13 +84,14 @@ fn rm2_digitizer_translator(device: &Device, x: i32, y: i32, d: i32) -> (i32, i3
 fn rm1_digitizer_translator(device: &Device, x: i32, y: i32, _d: i32) -> (i32, i32, i32) {
     (
         ((f64::from(y) / device.max_digitizer_width) * 100.0) as i32,
-        (((device.max_digitizer_height - f64::from(x)) / device.max_digitizer_height) * 100.0) as i32,
+        (((device.max_digitizer_height - f64::from(x)) / device.max_digitizer_height) * 100.0)
+            as i32,
         1,
     )
 }
 
-fn rgb565_image_data_translator(device: &Device, in_data: &[u8], out_data: &mut [u8]) {
-    for i in 0..(device.width * device.height) as usize {
+fn rgb565_image_data_translator(config: &FramebufferConfig, in_data: &[u8], out_data: &mut [u8]) {
+    for i in 0..(config.width * config.height) as usize {
         let a = in_data[2 * i + 1] as u16;
         let b = in_data[2 * i] as u16;
         let total = (a << 8) | b;
@@ -75,50 +111,34 @@ fn rgb565_image_data_translator(device: &Device, in_data: &[u8], out_data: &mut 
 pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
     match r#type {
         ReMarkableDevice::PaperPro => Device {
-            fb_size: 1632 * 2154 * 4,
-            height: 2154,
-            width: 1632,
-            image_data_translator: rgba_image_data_translator,
             digitizer_path: "/dev/input/event2",
             digitizer_data_translator: rmpp_digitizer_translator,
             max_digitizer_width: 11180.0,
             max_digitizer_height: 15340.0,
-            framebuffer_file: None,
+            override_framebuffer_config: None,
         },
         ReMarkableDevice::PaperProMove => Device {
-            fb_size: 960 * 1696 * 4,
-            height: 1696,
-            width: 960,
-            image_data_translator: rgba_image_data_translator,
             digitizer_path: "/dev/input/event2",
             digitizer_data_translator: rmpp_digitizer_translator,
             max_digitizer_width: 6760.0,
             max_digitizer_height: 11960.0,
-            framebuffer_file: None,
+            override_framebuffer_config: None,
         },
         ReMarkableDevice::RM2 => Device {
-            fb_size: 1872 * 1404 * 2,
-            height: 1872,
-            width: 1404,
-            image_data_translator: rgb565_image_data_translator,
             digitizer_path: "/dev/input/event1",
 
             digitizer_data_translator: rm2_digitizer_translator,
             max_digitizer_width: 20967.0,
             max_digitizer_height: 15725.0,
-            framebuffer_file: None,
+            override_framebuffer_config: None,
         },
         ReMarkableDevice::RM1 => Device {
-            fb_size: 1872 * 1408 * 2,
-            height: 1872,
-            width: 1408,
-            image_data_translator: rgb565_image_data_translator,
             digitizer_path: "/dev/input/event0",
 
             digitizer_data_translator: rm1_digitizer_translator,
             max_digitizer_width: 15725.0,
             max_digitizer_height: 20967.0,
-            framebuffer_file: Some("/dev/fb0"),
+            override_framebuffer_config: Some(&RM1_FRAMEBUFFER_CONFIG),
         },
     }
 }
