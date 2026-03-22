@@ -18,9 +18,7 @@ impl From<ParseIntError> for FramebufferSpyConfigParsingError {
         Self
     }
 }
-impl std::error::Error for FramebufferSpyConfigParsingError {
-
-}
+impl std::error::Error for FramebufferSpyConfigParsingError {}
 impl Display for FramebufferSpyConfigParsingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FramebufferSpyParsingError")

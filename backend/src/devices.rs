@@ -19,11 +19,12 @@ pub struct FramebufferConfig {
 
 impl From<FramebufferSpyConfig> for FramebufferConfig {
     fn from(value: FramebufferSpyConfig) -> Self {
-        let (pixel_size, image_data_translator): (u32, fn(&FramebufferConfig, &[u8], &mut [u8])) = match value.r#type {
-            2 => (4, rgba_image_data_translator),
-            1 => (2, rgb565_image_data_translator),
-            _ => panic!()
-        };
+        let (pixel_size, image_data_translator): (u32, fn(&FramebufferConfig, &[u8], &mut [u8])) =
+            match value.r#type {
+                2 => (4, rgba_image_data_translator),
+                1 => (2, rgb565_image_data_translator),
+                _ => panic!(),
+            };
         let fb_size = (value.bpl * value.height) as usize;
         Self {
             framebuffer_file: None,
@@ -31,7 +32,7 @@ impl From<FramebufferSpyConfig> for FramebufferConfig {
             fb_size,
             height: value.height,
             image_data_translator,
-            width: value.bpl / pixel_size
+            width: value.bpl / pixel_size,
         }
     }
 }

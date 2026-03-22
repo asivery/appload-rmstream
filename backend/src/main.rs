@@ -7,17 +7,19 @@ use std::os::fd::AsRawFd;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
-use appload_client::{AppLoad, AppLoadBackend, BackendReplier, Message, MSG_SYSTEM_NEW_COORDINATOR};
+use appload_client::{
+    AppLoad, AppLoadBackend, BackendReplier, Message, MSG_SYSTEM_NEW_COORDINATOR,
+};
 use async_trait::async_trait;
 use devices::{detect_device, get_device_info};
 use evdev::{AbsoluteAxisCode, Device, EventSummary, KeyCode, SynchronizationCode};
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
+use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::sleep;
 use warp::Filter;
-use futures::{SinkExt, StreamExt};
 
 use crate::devices::FramebufferConfig;
 use crate::framebuffer_spy::FramebufferSpyConfig;
@@ -45,13 +47,17 @@ impl ImageDelta {
 
 lazy_static! {
     static ref IMAGE_DATA: Mutex<Vec<u8>> = Mutex::new(Vec::default());
-    static ref CHANGES_BROADCASTER: Mutex<broadcast::Sender<Vec<u8>>> = Mutex::new(broadcast::channel(100).0);
+    static ref CHANGES_BROADCASTER: Mutex<broadcast::Sender<Vec<u8>>> =
+        Mutex::new(broadcast::channel(100).0);
 }
 
-async fn update_pointer_pos_forever() -> Result<()>{
+async fn update_pointer_pos_forever() -> Result<()> {
     let device_type = detect_device().unwrap();
     let device_info = get_device_info(device_type);
-    let mut evdev_device = Device::open(device_info.digitizer_path).unwrap().into_event_stream().unwrap();
+    let mut evdev_device = Device::open(device_info.digitizer_path)
+        .unwrap()
+        .into_event_stream()
+        .unwrap();
     let mut x: i32 = 0;
     let mut y: i32 = 0;
     let mut d: i32 = 0;
@@ -97,7 +103,8 @@ async fn get_current_screen_as_png(framebuffer_config: &FramebufferConfig) -> Re
     c.write_all(&[3u8]).unwrap();
     let mut w = BufWriter::new(&mut c);
 
-    let mut encoder = png::Encoder::new(&mut w, framebuffer_config.width, framebuffer_config.height);
+    let mut encoder =
+        png::Encoder::new(&mut w, framebuffer_config.width, framebuffer_config.height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder
@@ -115,7 +122,13 @@ async fn broadcast_changes_forever(mem_fd: File, config: &FramebufferConfig) -> 
     *IMAGE_DATA.lock().await = vec![0u8; (config.width * config.height * 4) as usize];
     loop {
         sleep(SCREEN_POLL_RATE).await;
-        if unsafe { libc::lseek(mem_fd.as_raw_fd(), config.address as libc::off_t, libc::SEEK_SET) } == -1
+        if unsafe {
+            libc::lseek(
+                mem_fd.as_raw_fd(),
+                config.address as libc::off_t,
+                libc::SEEK_SET,
+            )
+        } == -1
         {
             bail!("Failed to read memory!");
         }
@@ -139,14 +152,14 @@ async fn broadcast_changes_forever(mem_fd: File, config: &FramebufferConfig) -> 
         let mut abandon_deltas = false;
         for (i, (old, new)) in global_ref.iter().zip(&temp_buffer).enumerate() {
             match (*old == *new, current_delta.is_none()) {
-                (true, true) => {},
+                (true, true) => {}
                 (false, true) => {
                     // There is a difference, and we're not in a delta. => Create a new delta
                     current_delta = Some(ImageDelta {
                         offset: i as u32,
                         data: vec![*new],
                     });
-                },
+                }
                 (true, false) => {
                     // There's no difference, and we're in a delta => Finish delta.
                     deltas.extend_from_slice(&current_delta.unwrap().serialize());
@@ -156,7 +169,7 @@ async fn broadcast_changes_forever(mem_fd: File, config: &FramebufferConfig) -> 
                         abandon_deltas = true;
                         break;
                     }
-                },
+                }
                 (false, false) => {
                     // No changes, and delta exists => Append to delta
                     current_delta.as_mut().unwrap().data.push(*new);
@@ -169,7 +182,12 @@ async fn broadcast_changes_forever(mem_fd: File, config: &FramebufferConfig) -> 
 
         if abandon_deltas {
             println!("Abandonning deltas. Sending PNG instead!");
-            if CHANGES_BROADCASTER.lock().await.send(get_current_screen_as_png(config).await.unwrap()).is_ok() {
+            if CHANGES_BROADCASTER
+                .lock()
+                .await
+                .send(get_current_screen_as_png(config).await.unwrap())
+                .is_ok()
+            {
                 sleep(SLEEP_AFTER_PNG_TRANSMISSION).await;
             }
             continue;
@@ -193,13 +211,12 @@ async fn broadcast_changes_forever(mem_fd: File, config: &FramebufferConfig) -> 
 
 fn run_server(fb_config: &'static FramebufferConfig) {
     let page = warp::path::end().map(|| warp::reply::html(include_str!("page.html")));
-    let ws_page = warp::path("ws").and(warp::ws()).map(move |ws: warp::ws::Ws| {
-        ws.on_upgrade(move |ws| websocket_handler(fb_config, ws))
-    });
+    let ws_page = warp::path("ws")
+        .and(warp::ws())
+        .map(move |ws: warp::ws::Ws| ws.on_upgrade(move |ws| websocket_handler(fb_config, ws)));
     let routes = page.or(ws_page).with(warp::cors().allow_any_origin());
 
-    tokio::task::spawn(warp::serve(routes)
-        .run(([0, 0, 0, 0], PORT)));
+    tokio::task::spawn(warp::serve(routes).run(([0, 0, 0, 0], PORT)));
 }
 
 async fn get_config_packet(fb_config: &'static FramebufferConfig) -> Vec<u8> {
@@ -213,27 +230,39 @@ async fn websocket_handler(fb_config: &'static FramebufferConfig, websocket: war
     let (mut sender, mut _receiver) = websocket.split();
     // Encode initial resolution-preparing packet
     if let Err(e) = {
-        match sender.send(warp::ws::Message::binary(get_config_packet(fb_config).await)).await {
-            Ok(_) => {
-                sender.flush().await
-            }
-            e => e
+        match sender
+            .send(warp::ws::Message::binary(
+                get_config_packet(fb_config).await,
+            ))
+            .await
+        {
+            Ok(_) => sender.flush().await,
+            e => e,
         }
     } {
-        println!("Error while flushing the config packet. Disconnecting the client: {:?}", e);
+        println!(
+            "Error while flushing the config packet. Disconnecting the client: {:?}",
+            e
+        );
         return;
     }
 
     // Encode initial PNG data.
     if let Err(e) = {
-        match sender.send(warp::ws::Message::binary(get_current_screen_as_png(fb_config).await.unwrap())).await {
-            Ok(_) => {
-                sender.flush().await
-            }
-            e => e
+        match sender
+            .send(warp::ws::Message::binary(
+                get_current_screen_as_png(fb_config).await.unwrap(),
+            ))
+            .await
+        {
+            Ok(_) => sender.flush().await,
+            e => e,
         }
     } {
-        println!("Error while flushing the initial data. Disconnecting the client: {:?}", e);
+        println!(
+            "Error while flushing the initial data. Disconnecting the client: {:?}",
+            e
+        );
         return;
     }
     println!("Initial packet sent!");
@@ -242,13 +271,14 @@ async fn websocket_handler(fb_config: &'static FramebufferConfig, websocket: war
     while let Ok(delta_packet) = subscriber.recv().await {
         if let Err(e) = {
             match sender.send(warp::ws::Message::binary(delta_packet)).await {
-                Ok(_) => {
-                    sender.flush().await
-                }
-                e => e
+                Ok(_) => sender.flush().await,
+                e => e,
             }
         } {
-            println!("Error while sending delta packet. Disconnecting the client: {:?}", e);
+            println!(
+                "Error while sending delta packet. Disconnecting the client: {:?}",
+                e
+            );
             return;
         }
     }
@@ -256,37 +286,53 @@ async fn websocket_handler(fb_config: &'static FramebufferConfig, websocket: war
     println!("Client disconnected");
 }
 
-async fn real_main(pid: u32, sender: BackendReplier<MyBackend>, framebuffer_spy_config_string: String) -> Result<()>{
+async fn real_main(
+    pid: u32,
+    sender: BackendReplier<MyBackend>,
+    framebuffer_spy_config_string: String,
+) -> Result<()> {
     println!("Initializing rmStream...");
     let device = match detect_device() {
         Some(dev) => get_device_info(dev),
         None => {
-            sender.send_message(2, "The device you're using is not compatible!").unwrap();
+            sender
+                .send_message(2, "The device you're using is not compatible!")
+                .unwrap();
             println!("Device is not compatible!");
             return Ok(());
         }
     };
 
-    let (file, framebuffer_config): (File, &'static FramebufferConfig) = if let Some(framebuffer_config) = device.override_framebuffer_config {
-        let fb0_fd = OpenOptions::new()
-            .read(true)
-            .open(framebuffer_config.framebuffer_file.unwrap())?;
+    let (file, framebuffer_config): (File, &'static FramebufferConfig) =
+        if let Some(framebuffer_config) = device.override_framebuffer_config {
+            let fb0_fd = OpenOptions::new()
+                .read(true)
+                .open(framebuffer_config.framebuffer_file.unwrap())?;
 
-        (fb0_fd, framebuffer_config)
-    } else {
-        eprintln!("Opening xochitl's memory");
-        let mem_fd = OpenOptions::new()
-            .read(true)
-            .open(format!("/proc/{}/mem", pid))?;
-        if let Ok(framebuffer_spy_config) = FramebufferSpyConfig::parse(&framebuffer_spy_config_string) {
-            eprintln!("Framebuffer config is {framebuffer_spy_config:?} according to framebuffer-spy");
-
-            (mem_fd, Box::leak(Box::new(FramebufferConfig::from(framebuffer_spy_config))))
+            (fb0_fd, framebuffer_config)
         } else {
-            sender.send_message(2, "No framebuffer-spy installed").unwrap();
-            return Ok(())
-        }
-    };
+            eprintln!("Opening xochitl's memory");
+            let mem_fd = OpenOptions::new()
+                .read(true)
+                .open(format!("/proc/{}/mem", pid))?;
+            if let Ok(framebuffer_spy_config) =
+                FramebufferSpyConfig::parse(&framebuffer_spy_config_string)
+            {
+                eprintln!(
+                    "Framebuffer config is {framebuffer_spy_config:?} according to framebuffer-spy"
+                );
+
+                (
+                    mem_fd,
+                    Box::leak(Box::new(FramebufferConfig::from(framebuffer_spy_config))),
+                )
+            } else {
+                sender
+                    .send_message(2, "No framebuffer-spy installed")
+                    .unwrap();
+                return Ok(());
+            }
+        };
 
     tokio::spawn(broadcast_changes_forever(file, framebuffer_config));
     tokio::spawn(update_pointer_pos_forever());
@@ -297,7 +343,6 @@ async fn real_main(pid: u32, sender: BackendReplier<MyBackend>, framebuffer_spy_
     Ok(())
 }
 
-
 struct MyBackend {
     pub ready: bool,
     ip_addrs: Vec<String>,
@@ -307,19 +352,25 @@ struct MyBackend {
 
 #[async_trait]
 impl AppLoadBackend for MyBackend {
-    async fn handle_message(&mut self, functionality: &BackendReplier<MyBackend>, message: Message) {
+    async fn handle_message(
+        &mut self,
+        functionality: &BackendReplier<MyBackend>,
+        message: Message,
+    ) {
         match message.msg_type {
             MSG_SYSTEM_NEW_COORDINATOR => {
                 if !self.init {
                     functionality.send_message(3, "").unwrap();
                 }
-            },
+            }
             100 => {
                 if !self.init {
                     self.init = true;
                     tokio::spawn(real_main(self.pid, functionality.clone(), message.contents));
                 }
-                functionality.send_message(0, &format!("{},{}", self.ready, self.ip_addrs.join(","))).unwrap();
+                functionality
+                    .send_message(0, &format!("{},{}", self.ready, self.ip_addrs.join(",")))
+                    .unwrap();
             }
             m => {
                 eprintln!("Unhandled message type: {}", m);
@@ -333,7 +384,8 @@ async fn main() {
     let mut system = sysinfo::System::new();
     system.refresh_all();
     let pid = system
-        .processes_by_name("xochitl".as_ref()).next()
+        .processes_by_name("xochitl".as_ref())
+        .next()
         .unwrap()
         .pid()
         .as_u32();
