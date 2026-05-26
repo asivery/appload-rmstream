@@ -49,8 +49,9 @@ pub const RM1_FRAMEBUFFER_CONFIG: FramebufferConfig = FramebufferConfig {
 pub enum ReMarkableDevice {
     RM1,
     RM2,
-    PaperPro,
-    PaperProMove,
+    RMPP,
+    RMPPMove,
+    RMPPure
 }
 
 fn rgba_image_data_translator(config: &FramebufferConfig, in_data: &[u8], out_data: &mut [u8]) {
@@ -111,18 +112,25 @@ fn rgb565_image_data_translator(config: &FramebufferConfig, in_data: &[u8], out_
 
 pub fn get_device_info(r#type: ReMarkableDevice) -> Device {
     match r#type {
-        ReMarkableDevice::PaperPro => Device {
+        ReMarkableDevice::RMPPure => Device {
             digitizer_path: "/dev/input/event2",
             digitizer_data_translator: rmpp_digitizer_translator,
-            max_digitizer_width: 11180.0,
-            max_digitizer_height: 15340.0,
+            max_digitizer_width: 9620.0,
+            max_digitizer_height: 13000.0,
             override_framebuffer_config: None,
         },
-        ReMarkableDevice::PaperProMove => Device {
+        ReMarkableDevice::RMPPMove => Device {
             digitizer_path: "/dev/input/event2",
             digitizer_data_translator: rmpp_digitizer_translator,
             max_digitizer_width: 6760.0,
             max_digitizer_height: 11960.0,
+            override_framebuffer_config: None,
+        },
+        ReMarkableDevice::RMPP => Device {
+            digitizer_path: "/dev/input/event2",
+            digitizer_data_translator: rmpp_digitizer_translator,
+            max_digitizer_width: 11180.0,
+            max_digitizer_height: 15340.0,
             override_framebuffer_config: None,
         },
         ReMarkableDevice::RM2 => Device {
@@ -148,10 +156,12 @@ pub fn detect_device() -> Option<ReMarkableDevice> {
     let device_type_file = std::fs::read_to_string("/sys/devices/soc0/machine")
         .unwrap()
         .to_lowercase();
-    if device_type_file.contains("chiappa") {
-        Some(ReMarkableDevice::PaperProMove)
+    if device_type_file.contains("tatsu") {
+        Some(ReMarkableDevice::RMPPure)
+    } else if device_type_file.contains("chiappa") {
+        Some(ReMarkableDevice::RMPPMove)
     } else if device_type_file.contains("ferrari") {
-        Some(ReMarkableDevice::PaperPro)
+        Some(ReMarkableDevice::RMPP)
     } else if device_type_file.contains("2.0") {
         Some(ReMarkableDevice::RM2)
     } else {
